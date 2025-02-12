@@ -39,8 +39,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # for CORS
     'corsheaders',
+    "rest_framework",
     # for apps
-    'apps.supervised_learning.linear_reg',
+    'apps.comment_emotion',
 ]
 
 MIDDLEWARE = [
@@ -60,9 +61,11 @@ MIDDLEWARE = [
 # CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
     # Thay thế bằng URL của dự án UI nếu cần
-    "http://localhost:8000",
+    "http://localhost:8200",
     # Thêm các nguồn gốc khác nếu cần
 ]
+
+CORS_ALLOW_CREDENTIALS = True  # Nếu API cần xử lý cookie hoặc token
 
 ROOT_URLCONF = 'ML2AI_api.urls'
 
