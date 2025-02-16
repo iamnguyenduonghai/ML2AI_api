@@ -1,9 +1,7 @@
 import random
 import argparse
 import pandas as pd
-from django.db.models import UUIDField
 from pymongo import MongoClient
-from collections import defaultdict
 from datetime import datetime, timedelta
 
 
@@ -12,10 +10,24 @@ class Preprocess:
     def make_data(number):
         modules = {
             "Sale": ["Opportunity", "Quotation", "Sale Order"],
-            "Inventory": ["Warehouses", "Goods Issue", "Goods Receipt"],
-            "Purchase": ["Purchase Order", "Purchase Request", "AP Invoice"],
-            "Production": ["Production BOM", "Production Order", "Production Report"]
+            "Purchase": ["Purchase Request", "Purchase Order"],
+            "Inventory": ["Goods Receipt", "Goods Detail", "Delivery"],
+            "Report": ["Dashboard", "Report Inventory"],
         }
+
+        # Luồng thực tế
+        workflow = [
+            "Opportunity",
+            ("Quotation", 0.8),  # 80% user sẽ vào Quotation
+            "Sale Order",
+            ("Purchase Request", 0.8),  # 80% user sẽ vào Purchase Request
+            "Purchase Order",
+            "Goods Receipt",
+            ("Goods Detail", 0.3),  # 30% user sẽ vào Delivery
+            "Delivery",
+            ("Dashboard", 0.65),  # 66% user vào Dashboard
+            ("Report Inventory", 0.5)  # 50% user vào Report Inventory
+        ]
 
         employee_ids = [f"user{i}" for i in range(1, 11)]
         view_types = ["list", "create", "detail", "update"]
@@ -23,30 +35,44 @@ class Preprocess:
 
         data = []
         for _ in range(number):
-
             employee_id = random.choice(employee_ids)
-            module_name = random.choice(list(modules.keys()))
-            function_name = random.choice(modules[module_name])
-            view = random.choice(view_types)
-
             random_days = random.randint(0, 364)
-            hour = random.randint(7, 18)
+            hour = random.randint(6, 20)
             minute = random.randint(0, 59)
-
             timestamp = start_date + timedelta(days=random_days, hours=hour, minutes=minute)
 
-            data.append({
-                "employee_id": employee_id,
-                "module": module_name,
-                "function_name": function_name,
-                "view_name": view,
-                "path": f"/{module_name.lower()}/{function_name.lower().replace(' ', '_')}/{view}",
-                "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                "time_slot": hour
-            })
+            # Tạo luồng thực tế
+            session = []
+            for step in workflow:
+                if isinstance(step, tuple):  # Nếu có xác suất
+                    if random.random() < step[1]:  # Kiểm tra xác suất
+                        session.append(step[0])
+                else:
+                    session.append(step)
+
+            # Sinh dữ liệu cho từng bước trong session
+            for i in range(len(session)):
+                function_name = session[i]
+                module_name = next((key for key, val in modules.items() if function_name in val), "Unknown")
+                view = random.choice(view_types)
+
+                data.append({
+                    "employee_id": employee_id,
+                    "module": module_name,
+                    "function_name": function_name,
+                    "view_name": view,
+                    "path": f"/{module_name.lower()}/{function_name.lower().replace(' ', '_')}/{view}",
+                    "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "time_slot": hour
+                })
+
+                # Tăng thời gian lên 5-15 phút mỗi khi chuyển sang chức năng tiếp theo
+                timestamp += timedelta(minutes=random.randint(5, 15))
+
+        # Lưu dữ liệu vào CSV
         df = pd.DataFrame(data)
-        df.to_csv("user_activity_log_2024.csv", index=False)
-        print(df.head(5))
+        df.to_csv(r"D:\ML2AI\ML2AI_api\apps\menu_recommender\training\user_activity_log_realistic.csv", index=False)
+        print(df.head(10))
         return True
 
     @staticmethod
@@ -78,8 +104,8 @@ class Preprocess:
         return normalized_matrix
 
     @staticmethod
-    def process_and_save_to_mongo():
-        df = pd.read_csv(r'D:\ML2AI\ML2AI_api\apps\menu_recommender\training\user_activity_log_2024.csv')
+    def process_and_save_to_mongo(reset_db=False):
+        df = pd.read_csv(r'D:\ML2AI\ML2AI_api\apps\menu_recommender\training\user_activity_log_realistic.csv')
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         df = df.sort_values(by=["employee_id", "timestamp"])
         df['function_name_with_time_slot'] = df['function_name'].str.replace(' ', '_') + '#' + df['time_slot'].astype(str)
@@ -91,6 +117,10 @@ class Preprocess:
         db = client["employee_data"]
         collection = db["transitions_matrix_normalize"]
 
+        if reset_db:
+            collection.delete_many({})
+            print("Reset database!")
+
         documents = [
             {"employee_id": employee_id, "matrix": matrix}
             for employee_id, matrix in transitions_matrix_normalize.items()
@@ -98,7 +128,7 @@ class Preprocess:
 
         if documents:
             collection.insert_many(documents)
-            print("Saved")
+            print("Saved to MongoDB!")
             return True
         return False
 
@@ -119,19 +149,15 @@ class Predict:
         return data["matrix"] if data else None
 
     @staticmethod
-    def predict(user_id: str, function_name: str, time_slot: int):
+    def predict(user_id: str, function_name: str, time_slot: int, top_k=2):
         emp_transitions_matrix_normalize = Predict.load_employee_matrix(user_id)
         if emp_transitions_matrix_normalize:
-            next_function = None
             function_name_with_time_slot = function_name.replace(' ', '_') + '#' + str(time_slot)
             if function_name_with_time_slot in emp_transitions_matrix_normalize:
-                employee_matrix = emp_transitions_matrix_normalize[
-                    function_name_with_time_slot]  # Lấy ma trận của nhân viên đó
-                next_function = max(employee_matrix, key=employee_matrix.get)
-            return next_function
-        else:
-            print(f"⚠️ Không tìm thấy dữ liệu cho nhân viên {user_id}")
-            return None
+                employee_matrix = emp_transitions_matrix_normalize[function_name_with_time_slot]
+                top_functions = sorted(employee_matrix.items(), key=lambda x: x[1], reverse=True)[:top_k]
+                return [func.split('#')[0].replace('_', ' ') for func, _ in top_functions]
+        return []
 
 
 if __name__ == "__main__":
@@ -139,6 +165,7 @@ if __name__ == "__main__":
     parser.add_argument("--make_data", type=bool, default=False, help="is make data")
     parser.add_argument("--number", type=int, default=10000, help="number of data created")
     parser.add_argument("--save_mongo", type=bool, default=False, help="process data and save to mongodb")
+    parser.add_argument("--reset_db", type=bool, default=False, help="delete all db in mongodb")
     parser.add_argument("--predict", type=bool, default=True, help="is predict")
     parser.add_argument("--user_id", type=str, default='', help="user_id to predict")
     parser.add_argument("--function_name", type=str, default='', help="function_name to predict")
@@ -147,8 +174,8 @@ if __name__ == "__main__":
 
     if args.make_data and args.number:
         Preprocess.make_data(args.number)
-    elif args.save_mongo:
-        Preprocess.process_and_save_to_mongo()
+    elif args.save_mongo and args.reset_db:
+        Preprocess.process_and_save_to_mongo(args.reset_db)
     elif args.predict and args.user_id and args.function_name and args.time_slot:
         next_function = Predict.predict(args.user_id, args.function_name, args.time_slot)
         print(next_function)
