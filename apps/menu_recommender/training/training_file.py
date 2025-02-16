@@ -4,6 +4,8 @@ import pandas as pd
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 
+from sympy.codegen.cnodes import sizeof
+
 
 class Preprocess:
     @staticmethod
@@ -145,6 +147,7 @@ class Predict:
         client = MongoClient("mongodb://localhost:27017/")
         db = client["employee_data"]
         collection = db["transitions_matrix_normalize"]
+        print(sizeof(collection))
         data = collection.find_one({"employee_id": employee_id}, {"_id": 0, "matrix": 1})
         return data["matrix"] if data else None
 
