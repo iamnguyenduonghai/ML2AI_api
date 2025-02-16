@@ -1,0 +1,7 @@
+employee_id	Người dùng (U1 → U10)
+module	Thư mục chính (CRM, Inventory, HRM, Purchase, Production)
+function_name	Chức năng bên trong module
+view_name	Loại trang (list, create, detail, update)
+path	Đường dẫn của trang (VD: /crm/lead/list)
+timestamp	Thời gian truy cập (random từ 07:00 - 18:00, trong năm 2024)
+time_slot	Chỉ lấy giờ truy cập (VD: 8 nếu user vào 08:40 AM)

@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "rest_framework",
     # for apps
     'apps.comment_emotion',
+    'apps.menu_recommender',
 ]
 
 MIDDLEWARE = [
